@@ -1,8 +1,10 @@
 package standalone_storage
 
 import (
+	"github.com/Connor1996/badger"
 	"github.com/pingcap-incubator/tinykv/kv/config"
 	"github.com/pingcap-incubator/tinykv/kv/storage"
+	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/kvrpcpb"
 )
 
@@ -10,10 +12,17 @@ import (
 // communicate with other nodes and all data is stored locally.
 type StandAloneStorage struct {
 	// Your Data Here (1).
+	db *badger.DB
 }
 
+// NewStandAloneStorage 创建了一个新的StandAloneStorage实例
 func NewStandAloneStorage(conf *config.Config) *StandAloneStorage {
 	// Your Code Here (1).
+	if conf != nil {
+		return &StandAloneStorage{
+			db: engine_util.CreateDB(conf.DBPath, false),
+		}
+	}
 	return nil
 }
 
