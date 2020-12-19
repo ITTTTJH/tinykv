@@ -36,24 +36,108 @@ func NewServer(storage storage.Storage) *Server {
 // The below functions are Server's gRPC API (implements TinyKvServer).
 
 // Raw API.
+// RawGet 根据request取值，并返回相应的response，也是根据key取value
 func (server *Server) RawGet(_ context.Context, req *kvrpcpb.RawGetRequest) (*kvrpcpb.RawGetResponse, error) {
 	// Your Code Here (1).
-	return nil, nil
+	reader, err := server.storage.Reader(req.Context)
+	if err != nil {
+		return &kvrpcpb.RawGetResponse{
+			Error: err.Error(),
+		}, nil
+	}
+	defer reader.Close()
+	val, err := reader.GetCF(req.Cf, req.Key)
+	resp := &kvrpcpb.RawGetResponse{
+		Value: val,
+	}
+	if val == nil {
+		resp.NotFound = true
+	} else {
+		resp.NotFound = false
+	}
+	if err != nil {
+		resp.Error = err.Error()
+		return resp, nil
+	}
+	return resp, nil
 }
 
+// RawPut 根据request取值，并返回相应的response，还是利用storagealone里的write方法存键值对
 func (server *Server) RawPut(_ context.Context, req *kvrpcpb.RawPutRequest) (*kvrpcpb.RawPutResponse, error) {
 	// Your Code Here (1).
-	return nil, nil
+	batch := []storage.Modify{
+		{
+			Data: storage.Put{
+				Cf:    req.Cf,
+				Key:   req.Key,
+				Value: req.Value,
+			},
+		},
+	}
+	err := server.storage.Write(req.Context, batch)
+	resp := &kvrpcpb.RawPutResponse{}
+	if err != nil {
+		resp.Error = err.Error()
+		return resp, err
+	}
+	return resp, nil
 }
 
+// RawDelete 通过key删除相应的键值对，write函数有value为空则删除的功能，所以写入的键值对value为空即可删除
 func (server *Server) RawDelete(_ context.Context, req *kvrpcpb.RawDeleteRequest) (*kvrpcpb.RawDeleteResponse, error) {
 	// Your Code Here (1).
-	return nil, nil
+	batch := []storage.Modify{
+		{
+			Data: storage.Put{
+				Cf:  req.Cf,
+				Key: req.Key,
+			},
+		},
+	}
+	err := server.storage.Write(req.Context, batch)
+	resp := &kvrpcpb.RawDeleteResponse{}
+	if err != nil {
+		resp.Error = err.Error()
+		return resp, err
+	}
+	return resp, nil
 }
 
+// RawScan 根据key查找键值对，并返回包含目标键值对信息的RawScanResponse
 func (server *Server) RawScan(_ context.Context, req *kvrpcpb.RawScanRequest) (*kvrpcpb.RawScanResponse, error) {
 	// Your Code Here (1).
-	return nil, nil
+	resp := &kvrpcpb.RawScanResponse{}
+	if req.Limit == 0 {
+		return resp, nil
+	}
+	reader, err := server.storage.Reader(req.Context)
+	defer reader.Close()
+	if err != nil {
+		resp.Error = err.Error()
+		return resp, nil
+	}
+	iter := reader.IterCF(req.Cf)
+	iter.Seek(req.StartKey)
+	defer iter.Close()
+	pairs := make([]*kvrpcpb.KvPair, 0)
+	for i := 0; i < int(req.Limit); i++ {
+		item := iter.Item()
+		val, err := item.Value()
+		if err != nil {
+			resp.Error = err.Error()
+			return resp, nil
+		}
+		pairs = append(pairs, &kvrpcpb.KvPair{
+			Key:   item.Key(),
+			Value: val,
+		})
+		iter.Next()
+		if !iter.Valid() {
+			break
+		}
+	}
+	resp.Kvs = pairs
+	return resp, nil
 }
 
 // Raft commands (tinykv <-> tinykv)

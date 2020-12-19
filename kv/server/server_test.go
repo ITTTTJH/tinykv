@@ -102,7 +102,7 @@ func TestRawPut1(t *testing.T) {
 
 	_, err := server.RawPut(nil, req)
 
-	got, err := Get(s, cf, []byte{99})
+	got, err := Get(s, cf, []byte{99}) //got是通过key获取的value
 	assert.Nil(t, err)
 	assert.Equal(t, []byte{42}, got)
 }

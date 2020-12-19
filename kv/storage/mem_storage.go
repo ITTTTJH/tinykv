@@ -135,6 +135,7 @@ type memReader struct {
 	iterCount int
 }
 
+// GetCF 借助左倾红黑树LLRB结构进行操作，调用了llrb包，也是通过key取value
 func (mr *memReader) GetCF(cf string, key []byte) ([]byte, error) {
 	item := memItem{key: key}
 	var result llrb.Item
