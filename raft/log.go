@@ -50,13 +50,32 @@ type RaftLog struct {
 	pendingSnapshot *pb.Snapshot
 
 	// Your Data Here (2A).
+	FirstIndex uint64
 }
 
 // newLog returns log using the given storage. It recovers the log
 // to the state that it just commits and applies the latest snapshot.
 func newLog(storage Storage) *RaftLog {
 	// Your Code Here (2A).
-	return nil
+	raftlog := &RaftLog{
+		storage: storage,
+	}
+	lo, _ := storage.FirstIndex()
+	hi, _ := storage.LastIndex()
+	var err error
+	raftlog.entries, err = storage.Entries(lo, hi+1)
+	if err != nil {
+		panic(err)
+	}
+	snapshot, err := storage.Snapshot()
+	if err != nil {
+		panic(err)
+	}
+	raftlog.pendingSnapshot = &snapshot
+	raftlog.applied = lo - 1
+	raftlog.stabled = hi
+	raftlog.FirstIndex = lo
+	return raftlog
 }
 
 // We need to compact the log entries in some point of time like
@@ -81,11 +100,17 @@ func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 // LastIndex return the last index of the log entries
 func (l *RaftLog) LastIndex() uint64 {
 	// Your Code Here (2A).
-	return 0
+	var index1, index2 uint64
+	if len(l.entries) > 0 {
+		return max(l.entries[len(l.entries)-1].Index, index1)
+	}
+	index2, _ = l.storage.LastIndex()
+	return max(index1, index2)
 }
 
 // Term return the term of the entry in the given index
 func (l *RaftLog) Term(i uint64) (uint64, error) {
 	// Your Code Here (2A).
-	return 0, nil
+	term, err := l.storage.Term(i)
+	return term, err
 }

@@ -16,6 +16,7 @@ package raft
 
 import (
 	"errors"
+	"math/rand"
 
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
@@ -117,6 +118,7 @@ type Raft struct {
 	RaftLog *RaftLog
 
 	// log replication progress of each peers
+	// 所有node的id值
 	Prs map[uint64]*Progress
 
 	// this peer's role
@@ -163,7 +165,37 @@ func newRaft(c *Config) *Raft {
 		panic(err.Error())
 	}
 	// Your Code Here (2A).
-	return nil
+	raft := &Raft{
+		id:               c.ID,
+		Prs:              make(map[uint64]*Progress),
+		heartbeatTimeout: c.HeartbeatTick,
+		electionTimeout:  c.ElectionTick,
+		RaftLog:          newLog(c.Storage),
+	}
+	// confst.Nodes包含所有node的id值
+	hardstate, confst, _ := raft.RaftLog.storage.InitialState()
+	// rand.Intn()的作用是生成一个[0,n)的随机值
+	raft.electionTimeout = raft.electionTimeout + rand.Intn(raft.electionTimeout)
+	raft.Term = hardstate.Term
+	raft.Vote = hardstate.Vote
+	raft.RaftLog.committed = hardstate.Commit
+	// 当传入的peers为空时，直接把confst.Nodes赋值给peers
+	if c.peers == nil {
+		c.peers = confst.Nodes
+	}
+	for _, peer := range c.peers {
+		if peer == raft.id {
+			raft.Prs[peer] = &Progress{Next: raft.RaftLog.LastIndex() + 1, Match: raft.RaftLog.LastIndex()}
+		} else {
+			raft.Prs[peer] = &Progress{Next: raft.RaftLog.LastIndex() + 1}
+		}
+	}
+	raft.becomeFollower(0, None)
+	// 更新applied
+	if c.Applied > 0 {
+		raft.RaftLog.applied = c.Applied
+	}
+	return raft
 }
 
 // sendAppend sends an append RPC with new entries (if any) and the
@@ -186,27 +218,66 @@ func (r *Raft) tick() {
 // becomeFollower transform this peer's state to Follower
 func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	// Your Code Here (2A).
+	r.Term = term
+	r.Lead = lead
+	r.State = StateFollower
 }
 
 // becomeCandidate transform this peer's state to candidate
 func (r *Raft) becomeCandidate() {
 	// Your Code Here (2A).
+	r.State = StateCandidate
 }
 
 // becomeLeader transform this peer's state to leader
 func (r *Raft) becomeLeader() {
 	// Your Code Here (2A).
 	// NOTE: Leader should propose a noop entry on its term
+	r.State = StateLeader
 }
 
 // Step the entrance of handle message, see `MessageType`
 // on `eraftpb.proto` for what msgs should be handled
 func (r *Raft) Step(m pb.Message) error {
 	// Your Code Here (2A).
+	if m.Term > r.Term {
+		r.becomeFollower(m.Term, None)
+	}
 	switch r.State {
 	case StateFollower:
+		r.stepStateFollower(m)
 	case StateCandidate:
+		r.stepStateCandidate(m)
 	case StateLeader:
+		r.stepStateLead(m)
+	}
+	return nil
+}
+
+func (r *Raft) electionstart() {
+
+}
+
+func (r *Raft) stepStateFollower(m pb.Message) error {
+	switch m.MsgType {
+	case pb.MessageType_MsgAppend:
+		r.handleAppendEntries(m)
+	}
+	return nil
+}
+
+func (r *Raft) stepStateCandidate(m pb.Message) error {
+	switch m.MsgType {
+	case pb.MessageType_MsgAppend:
+		r.handleAppendEntries(m)
+	}
+	return nil
+}
+
+func (r *Raft) stepStateLead(m pb.Message) error {
+	switch m.MsgType {
+	case pb.MessageType_MsgAppend:
+		r.handleAppendEntries(m)
 	}
 	return nil
 }
@@ -214,6 +285,29 @@ func (r *Raft) Step(m pb.Message) error {
 // handleAppendEntries handle AppendEntries RPC request
 func (r *Raft) handleAppendEntries(m pb.Message) {
 	// Your Code Here (2A).
+	r.electionElapsed = 0
+	r.electionTimeout = r.electionTimeout + rand.Intn(r.electionTimeout)
+	r.Lead = m.From
+	for i, entry := range m.Entries {
+		if entry.Index < r.RaftLog.FirstIndex {
+			continue
+		}
+		if entry.Index <= r.RaftLog.LastIndex() {
+			logTerm, _ := r.RaftLog.Term(entry.Index)
+			if logTerm != entry.Term {
+				wide := entry.Index - r.RaftLog.FirstIndex
+				r.RaftLog.entries[wide] = *entry
+				r.RaftLog.entries = r.RaftLog.entries[:wide+1]
+				r.RaftLog.stabled = min(r.RaftLog.stabled, entry.Index-1)
+			}
+		} else {
+			n := len(m.Entries)
+			for j := i; j < n; j++ {
+				r.RaftLog.entries = append(r.RaftLog.entries, *m.Entries[j])
+			}
+			break
+		}
+	}
 }
 
 // handleHeartbeat handle Heartbeat RPC request
