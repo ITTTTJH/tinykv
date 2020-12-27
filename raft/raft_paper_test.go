@@ -571,7 +571,8 @@ func TestFollowerCommitEntry2AB(t *testing.T) {
 func TestFollowerCheckMessageType_MsgAppend2AB(t *testing.T) {
 	ents := []pb.Entry{{Term: 1, Index: 1}, {Term: 2, Index: 2}}
 	tests := []struct {
-		term    uint64
+		term uint64
+
 		index   uint64
 		wreject bool
 	}{
